@@ -3,16 +3,16 @@ package com.parasut;
 import org.keycloak.Config;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.services.resource.RealmResourceProvider;
-import org.keycloak.services.resource.RealmResourceProviderFactory;
+import org.keycloak.services.resources.admin.ext.AdminRealmResourceProvider;
+import org.keycloak.services.resources.admin.ext.AdminRealmResourceProviderFactory;
 
-public class PasswordTrackerProviderFactory implements RealmResourceProviderFactory {
+public class PasswordTrackerProviderFactory implements AdminRealmResourceProviderFactory {
 
     public static final String PROVIDER_ID = "password-tracker";
 
     @Override
-    public RealmResourceProvider create(KeycloakSession session) {
-        return new PasswordTrackerProvider(session);
+    public AdminRealmResourceProvider create(KeycloakSession session) {
+        return new PasswordTrackerProvider();
     }
 
     @Override

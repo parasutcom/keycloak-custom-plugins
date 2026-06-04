@@ -4,9 +4,10 @@ Keycloak için özel bir REST endpoint sağlayan plugin. Verilen kullanıcı ID 
 
 ## Ne Yapar?
 
-Plugin, Keycloak'a `password-tracker` adında bir `RealmResourceProvider` ekler. Bu sayede aşağıdaki endpoint kullanılabilir hale gelir:
+Plugin, Keycloak'a `password-tracker` adında bir `AdminRealmResourceProvider` ekler. Bu sayede endpoint **Admin API** altında kullanılabilir hale gelir:
 
-- **Endpoint:** `POST /realms/{realm}/password-tracker/last-updates`
+- **Endpoint:** `POST /admin/realms/{realm}/password-tracker/last-updates`
+- **Yetkilendirme (Authorization):** Geçerli bir admin access token gereklidir (`Authorization: Bearer <token>`). Çağıran kullanıcının kullanıcıları görüntüleme (`view-users`) yetkisi olmalıdır.
 - **Content-Type:** `application/json`
 - **İstek Gövdesi (Request Body):** Kullanıcı ID'lerinden oluşan bir JSON dizisi
   ```json
@@ -38,10 +39,11 @@ bulkfetchuserscustomendpoint/
 ├── pom.xml
 └── src/main/
     ├── java/com/parasut/
-    │   ├── PasswordTrackerProvider.java         # Endpoint mantığı (REST resource)
+    │   ├── PasswordTrackerResource.java         # Endpoint mantığı (JAX-RS REST resource + yetki kontrolü)
+    │   ├── PasswordTrackerProvider.java         # AdminRealmResourceProvider (resource'u döner)
     │   └── PasswordTrackerProviderFactory.java  # Provider factory (provider id: "password-tracker")
     └── resources/META-INF/services/
-        └── org.keycloak.services.resource.RealmResourceProviderFactory  # SPI kaydı
+        └── org.keycloak.services.resources.admin.ext.AdminRealmResourceProviderFactory  # SPI kaydı
 ```
 
 ## Gereksinimler
@@ -77,7 +79,8 @@ target/bulkfetchuserscustomendpoint-1.0.0.jar
 ## Örnek Kullanım
 
 ```bash
-curl -X POST "https://<keycloak-host>/realms/<realm>/password-tracker/last-updates" \
+curl -X POST "https://<keycloak-host>/admin/realms/<realm>/password-tracker/last-updates" \
+  -H "Authorization: Bearer <admin-access-token>" \
   -H "Content-Type: application/json" \
   -d '["user-id-1", "user-id-2"]'
 ```

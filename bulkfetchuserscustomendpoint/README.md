@@ -79,8 +79,14 @@ target/bulkfetchuserscustomendpoint-1.0.0.jar
 ## Örnek Kullanım
 
 ```bash
+PARASUT_TOKEN=$(curl -s -X POST http://localhost:8080/realms/parasut/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=parasut-app" \
+  -d "client_secret=very_very_secret_key" | jq -r .access_token)
+
 curl -X POST "https://<keycloak-host>/admin/realms/<realm>/password-tracker/last-updates" \
-  -H "Authorization: Bearer <admin-access-token>" \
+  -H "Authorization: Bearer $PARASUT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '["user-id-1", "user-id-2"]'
 ```

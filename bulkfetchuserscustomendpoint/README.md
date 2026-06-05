@@ -1,22 +1,35 @@
 # Bulk Fetch Users Custom Endpoint (Keycloak Plugin)
 
-Keycloak için özel bir REST endpoint sağlayan plugin. Verilen kullanıcı ID listesi için her kullanıcının credential (kimlik bilgisi) kayıtlarını toplu (bulk) olarak döner. Özellikle parolaların / credential'ların en son ne zaman oluşturulduğunu/güncellendiğini takip etmek için kullanılır.
+Keycloak için özel bir REST endpoint sağlayan plugin. Verilen kullanıcı ID listesi için kullanıcıların credential (kimlik bilgisi) tarihlerini ve required action'larını toplu (bulk) olarak döndürür; ayrıca toplu olarak oturum kapatıp `UPDATE_PASSWORD` zorlayabilir. Per-user senkron Keycloak çağrılarını chunk başına tek isteğe indirmek için kullanılır.
 
 ## Ne Yapar?
 
-Plugin, Keycloak'a `password-tracker` adında bir `AdminRealmResourceProvider` ekler. Bu sayede endpoint **Admin API** altında kullanılabilir hale gelir:
+Plugin, Keycloak'a `password-tracker` adında bir `AdminRealmResourceProvider` ekler. Tüm endpoint'ler **Admin API** altında, `POST` ile çalışır; istek gövdesi her zaman kullanıcı ID'lerinden oluşan bir JSON dizisidir.
 
-- **Endpoint:** `POST /admin/realms/{realm}/password-tracker/last-updates`
-- **Yetkilendirme (Authorization):** Geçerli bir admin access token gereklidir (`Authorization: Bearer <token>`). Çağıran kullanıcının kullanıcıları görüntüleme (`view-users`) yetkisi olmalıdır.
+- **Base path:** `/admin/realms/{realm}/password-tracker`
 - **Content-Type:** `application/json`
-- **İstek Gövdesi (Request Body):** Kullanıcı ID'lerinden oluşan bir JSON dizisi
+- **Yetkilendirme (Authorization):** Geçerli bir admin access token gereklidir (`Authorization: Bearer <token>`). Read endpoint'leri için `view-users`, write endpoint'i için `manage-users` yetkisi gerekir.
+- **İstek Gövdesi (Request Body):** Tüm endpoint'lerde kullanıcı ID'lerinden oluşan bir JSON dizisi:
   ```json
   ["user-id-1", "user-id-2", "user-id-3"]
   ```
-- **Yanıt (Response):** Her kullanıcı ID'si için credential listesi
-  ```json
-  {
-    "user-id-1": [
+
+> Not: İstek gövdesi boş veya null gönderilirse boş bir obje (`{}`) döner.
+
+### Endpoint A — `POST /password-tracker/last-updates`
+
+Verilen kullanıcıların credential kayıtlarını toplu döner (yetki: `view-users`). `?includeRequiredActions=true` query parametresi verilirse cevaba `requiredActions` da eklenir.
+
+- **Query parametresi:** `includeRequiredActions` (opsiyonel, varsayılan `false`)
+- Backfill worker bayraksız çağırır (yalnızca `credentials`).
+- User-group worker `?includeRequiredActions=true` ile çağırıp zaten `UPDATE_PASSWORD` beklentisi olan kullanıcıları eler.
+
+`?includeRequiredActions=true` ile yanıt:
+
+```json
+{
+  "user-id-1": {
+    "credentials": [
       {
         "id": "credential-uuid",
         "type": "password",
@@ -24,13 +37,40 @@ Plugin, Keycloak'a `password-tracker` adında bir `AdminRealmResourceProvider` e
         "createdDate": 1700000000000
       }
     ],
-    "user-id-2": []
+    "requiredActions": ["UPDATE_PASSWORD"]
   }
-  ```
+}
+```
 
-Her credential için şu alanlar döner: `id`, `type`, `userLabel`, `createdDate`.
+Bayraksız (varsayılan) yanıtta `requiredActions` alanı **hiç bulunmaz**:
 
-> Not: İstek gövdesi boş veya null gönderilirse boş bir obje (`{}`) döner. Bulunamayan kullanıcı ID'leri yanıta dahil edilmez.
+```json
+{
+  "user-id-1": {
+    "credentials": [
+      { "id": "credential-uuid", "type": "password", "userLabel": null, "createdDate": 1700000000000 }
+    ]
+  }
+}
+```
+
+- `credentials`: kullanıcının tüm credential kayıtları; her biri `id`, `type`, `userLabel`, `createdDate` döner. Parola tarihi için `type == "password"` olan kaydın `createdDate`'i kullanılır.
+- `requiredActions`: yalnızca `includeRequiredActions=true` iken döner; kullanıcının `requiredActions` listesi (yoksa `[]`).
+- Bulunamayan kullanıcı ID'leri yanıta dahil edilmez.
+
+### Endpoint B — `POST /password-tracker/require-password-update`
+
+Verilen her kullanıcı için server-side olarak **tüm oturumları kapatır** ve `UPDATE_PASSWORD` required action'ı ekler (yetki: `manage-users`). İdempotenttir.
+
+```json
+{
+  "user-id-1": "updated",
+  "user-id-2": "error"
+}
+```
+
+- Her kullanıcı için: tüm session'lar invalidate edilir (backchannel logout) + `UPDATE_PASSWORD` eklenir (zaten varsa tekrar eklenmez).
+- Bulunamayan veya işlenemeyen kullanıcılar için değer `"error"` olur.
 
 ## Proje Yapısı
 
@@ -85,7 +125,20 @@ PARASUT_TOKEN=$(curl -s -X POST http://localhost:8080/realms/parasut/protocol/op
   -d "client_id=parasut-app" \
   -d "client_secret=very_very_secret_key" | jq -r .access_token)
 
+# Endpoint A — yalnızca credential kayıtları (backfill)
 curl -X POST "https://<keycloak-host>/admin/realms/<realm>/password-tracker/last-updates" \
+  -H "Authorization: Bearer $PARASUT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '["user-id-1", "user-id-2"]'
+
+# Endpoint A — credential kayıtları + required actions (user-group)
+curl -X POST "https://<keycloak-host>/admin/realms/<realm>/password-tracker/last-updates?includeRequiredActions=true" \
+  -H "Authorization: Bearer $PARASUT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '["user-id-1", "user-id-2"]'
+
+# Endpoint B — oturumları kapat + UPDATE_PASSWORD zorla
+curl -X POST "https://<keycloak-host>/admin/realms/<realm>/password-tracker/require-password-update" \
   -H "Authorization: Bearer $PARASUT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '["user-id-1", "user-id-2"]'
